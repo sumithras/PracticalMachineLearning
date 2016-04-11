@@ -1,0 +1,101 @@
+---
+Title: "PML Project"
+date: "April 11, 2016"
+output: html_document
+---
+# Introduction
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+```{r, echo=FALSE}
+library(YaleToolkit)
+library(caret)
+library(bnclassify)
+library(rpart.plot)
+```
+
+# Data cleansing and preparation
+Typically, one would use the training data for this purpose but we choose a different approach. Since the goal of the project is to classify the 20 data points in the test data set we look at this data to make data preparation and cleansing decisions. We removed factors that were blank or "NA" in the test data set as well as the first 7 columns that contained data not closely related to the outcome.
+
+```{r}
+v = read.csv('pml-testing.csv', sep = ',', header = TRUE, na.strings = 'NA')
+# Get information about testing data set to remove factors that cannot be used to predict
+metaData = whatis(v)
+# Remove blank columns
+selectedPredictors1 = metaData[metaData$missing!=20,]
+# Remove first 7 and last columns containing row number, participant name, time data and id number
+selectedPredictors2 = selectedPredictors1[8:(dim(selectedPredictors1)[1]-1),]
+factorNames = as.character(selectedPredictors2[,1])
+validation = v[,factorNames]
+```
+
+
+We remove exactly the same columns from the training data. Through a quick inspection we find that the remaining data does not suffer from missing or "NA" values so we will use this to build our model.
+
+```{r}
+d <- read.csv('pml-training.csv', sep = ',', header = TRUE, na.strings = 'NA')
+dClean = d[,c(factorNames, 'classe')]
+head(dClean)
+```
+
+We divide the training data further into a training and testing/validation set. We will use the training set to fit various models and then use the testing set to check for model accuracy.
+
+```{r}
+set.seed(123)
+inTrain <- createDataPartition(y=dClean$classe,p=0.75,list = FALSE)
+training = dClean[inTrain,]
+testing  = dClean[-inTrain,]
+```
+
+We are still left with 53 predictors and it is hard to apply visualization tools. Just as an experiment, we plot a couple of factors against each other and color code it using the classification.
+```{r}
+qplot(total_accel_forearm, total_accel_dumbbell, data=dClean, colour=classe)
+```
+
+
+# Model fitting
+## Linear discriminant analysis (LDA)
+We use the train function from the caret package. This automatically performs model selection based on resampling and cross validation and selects the best model fit. We predict based on the selected model to check for accuracy. 70% accuracy is quite low so we will try additional classification methods.
+```{r}
+cvCtrl <- trainControl(method = "repeatedcv", repeats = 3)
+fit1 = train(classe~.,method='lda',data=training, trControl = cvCtrl)
+#print(fit1$finalModel)
+pred1=predict(fit1, testing)
+accuracy(pred1, testing$classe)
+confusionMatrix(pred1, testing$classe)
+```
+
+## CART
+We user the same data to fit a classification tree and find that its accuracy is much lower
+```{r}
+fit2 = train(classe~.,method='rpart',data=training, trControl = cvCtrl)
+pred2=predict(fit2, testing)
+accuracy(pred2, testing$classe)
+prp(fit2$finalModel)
+```
+
+## Naive Bayes
+This method does better than LDA with an accuracy of about 74%, but does not provide satisfactory prediction accuracy. The code below is commneted out as it generates a lot of warning messages.
+```{r}
+#fit3 = train(classe~.,method='nb',data=training, trControl = cvCtrl)
+#pred3=predict(fit3, testing)
+#accuracy(pred3, testing$classe)
+```
+
+## Random Forest
+We tried using the train funciton's "rf" method but it did not finish running in several hours. We aborted that attempt and fit one random set model to the training data. This fit reported an accuracy close to 100% on the validation data set. We selected this model to make the final predictions.
+
+```{r}
+#fit4 = train(classe~.,method='rf',data=training, trControl = cvCtrl)
+library(randomForest)
+fit4 = randomForest(classe~.,data=training)
+fit4
+pred4=predict(fit4, testing)
+accuracy(pred4, testing$classe)
+```
+
+# Final predictions
+We make the final prediction using the fitted random forest model.
+```{r}
+predictions=predict(fit4, validation)
+predictions
+```
